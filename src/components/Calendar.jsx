@@ -286,17 +286,31 @@ function Calendar() {
   }
 
   const formatEventTime = (event) => {
-    const startDate = new Date(event.start)
-    const endDate = new Date(event.end)
+    let startDate, endDate
+
+    // For all-day events, parse date string in local time to avoid timezone issues
+    if (event.allDay) {
+      const [year, month, day] = event.start.split('-').map(Number)
+      startDate = new Date(year, month - 1, day)
+      const [endYear, endMonth, endDay] = event.end.split('-').map(Number)
+      endDate = new Date(endYear, endMonth - 1, endDay)
+    } else {
+      startDate = new Date(event.start)
+      endDate = new Date(event.end)
+    }
+
     const today = new Date()
+    today.setHours(0, 0, 0, 0)
 
     // Check if event is today
-    const isToday = startDate.toDateString() === today.toDateString()
+    const eventDateOnly = new Date(startDate)
+    eventDateOnly.setHours(0, 0, 0, 0)
+    const isToday = eventDateOnly.getTime() === today.getTime()
 
     // Check if event is tomorrow
     const tomorrow = new Date(today)
     tomorrow.setDate(tomorrow.getDate() + 1)
-    const isTomorrow = startDate.toDateString() === tomorrow.toDateString()
+    const isTomorrow = eventDateOnly.getTime() === tomorrow.getTime()
 
     if (event.allDay) {
       if (isToday) return 'Today - All Day'
@@ -332,7 +346,18 @@ function Calendar() {
       date.setDate(today.getDate() + i)
 
       const dayEvents = events.filter(event => {
-        const eventDate = new Date(event.start)
+        let eventDate
+
+        // For all-day events, parse the date string directly in local time
+        // to avoid timezone conversion issues
+        if (event.allDay) {
+          const dateStr = event.start // This is "YYYY-MM-DD" format
+          const [year, month, day] = dateStr.split('-').map(Number)
+          eventDate = new Date(year, month - 1, day) // month is 0-indexed
+        } else {
+          eventDate = new Date(event.start)
+        }
+
         eventDate.setHours(0, 0, 0, 0)
         return eventDate.getTime() === date.getTime()
       })
