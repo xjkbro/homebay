@@ -7,6 +7,7 @@ const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/calendar/v3/
 let tokenClient = null
 let gapiInited = false
 let gisInited = false
+let tokenRefreshTimer = null
 
 // Initialize Google API client
 export const initGoogleAuth = () => {
@@ -49,6 +50,63 @@ export const initGoogleAuth = () => {
   })
 }
 
+// Schedule automatic token refresh before expiration
+const scheduleTokenRefresh = (expiresAt) => {
+  // Clear any existing timer
+  if (tokenRefreshTimer) {
+    clearTimeout(tokenRefreshTimer)
+  }
+
+  // Refresh 5 minutes before expiration
+  const refreshTime = expiresAt - Date.now() - (5 * 60 * 1000)
+
+  if (refreshTime > 0) {
+    console.log(`Token will auto-refresh in ${Math.round(refreshTime / 1000 / 60)} minutes`)
+    tokenRefreshTimer = setTimeout(() => {
+      console.log('Auto-refreshing token...')
+      silentTokenRefresh().catch((error) => {
+        console.error('Auto-refresh failed:', error)
+        // Token will need manual re-auth on next API call
+      })
+    }, refreshTime)
+  }
+}
+
+// Silently refresh token without user interaction
+const silentTokenRefresh = () => {
+  return new Promise((resolve, reject) => {
+    if (!tokenClient) {
+      reject(new Error('Token client not initialized'))
+      return
+    }
+
+    tokenClient.callback = async (response) => {
+      if (response.error) {
+        console.error('Silent token refresh failed:', response.error)
+        // Clear stored token if refresh fails
+        localStorage.removeItem('google_token')
+        reject(response)
+        return
+      }
+
+      // Store new token with expiration time
+      const tokenInfo = {
+        access_token: response.access_token,
+        expires_at: Date.now() + (response.expires_in * 1000)
+      }
+      localStorage.setItem('google_token', JSON.stringify(tokenInfo))
+      window.gapi.client.setToken({ access_token: response.access_token })
+
+      scheduleTokenRefresh(tokenInfo.expires_at)
+      console.log('Token refreshed successfully')
+      resolve(response)
+    }
+
+    // Request token silently (won't prompt user if session is still active)
+    tokenClient.requestAccessToken({ prompt: '' })
+  })
+}
+
 // Request access token
 export const authorize = () => {
   return new Promise((resolve, reject) => {
@@ -69,6 +127,9 @@ export const authorize = () => {
         expires_at: Date.now() + (response.expires_in * 1000)
       }
       localStorage.setItem('google_token', JSON.stringify(tokenInfo))
+      window.gapi.client.setToken({ access_token: response.access_token })
+
+      scheduleTokenRefresh(tokenInfo.expires_at)
       resolve(response)
     }
 
@@ -77,10 +138,17 @@ export const authorize = () => {
     if (storedToken && storedToken.expires_at > Date.now()) {
       // Token is still valid
       window.gapi.client.setToken({ access_token: storedToken.access_token })
+      scheduleTokenRefresh(storedToken.expires_at)
       resolve({ access_token: storedToken.access_token })
     } else {
-      // Request new token
-      tokenClient.requestAccessToken({ prompt: 'consent' })
+      // Try silent refresh first (works if browser session is still active)
+      silentTokenRefresh()
+        .then(resolve)
+        .catch(() => {
+          // If silent refresh fails, show consent screen (first time or session expired)
+          console.log('Silent refresh failed, requesting user consent')
+          tokenClient.requestAccessToken({ prompt: 'consent' })
+        })
     }
   })
 }
@@ -109,6 +177,12 @@ export const isAuthenticated = () => {
 
 // Sign out
 export const signOut = () => {
+  // Clear auto-refresh timer
+  if (tokenRefreshTimer) {
+    clearTimeout(tokenRefreshTimer)
+    tokenRefreshTimer = null
+  }
+
   const token = getStoredToken()
   if (token) {
     window.google.accounts.oauth2.revoke(token.access_token, () => {

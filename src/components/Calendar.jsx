@@ -346,20 +346,32 @@ function Calendar() {
       date.setDate(today.getDate() + i)
 
       const dayEvents = events.filter(event => {
-        let eventDate
+        let eventStartDate, eventEndDate
 
         // For all-day events, parse the date string directly in local time
         // to avoid timezone conversion issues
         if (event.allDay) {
-          const dateStr = event.start // This is "YYYY-MM-DD" format
-          const [year, month, day] = dateStr.split('-').map(Number)
-          eventDate = new Date(year, month - 1, day) // month is 0-indexed
+          const startStr = event.start // This is "YYYY-MM-DD" format
+          const [startYear, startMonth, startDay] = startStr.split('-').map(Number)
+          eventStartDate = new Date(startYear, startMonth - 1, startDay) // month is 0-indexed
+
+          const endStr = event.end
+          const [endYear, endMonth, endDay] = endStr.split('-').map(Number)
+          eventEndDate = new Date(endYear, endMonth - 1, endDay)
+          // Google Calendar's end date for all-day events is exclusive (the day after the event ends)
+          // So subtract one day to get the actual last day of the event
+          eventEndDate.setDate(eventEndDate.getDate() - 1)
         } else {
-          eventDate = new Date(event.start)
+          eventStartDate = new Date(event.start)
+          eventEndDate = new Date(event.end)
         }
 
-        eventDate.setHours(0, 0, 0, 0)
-        return eventDate.getTime() === date.getTime()
+        eventStartDate.setHours(0, 0, 0, 0)
+        eventEndDate.setHours(0, 0, 0, 0)
+        const dateTime = date.getTime()
+
+        // Check if this day falls within the event's date range (inclusive)
+        return dateTime >= eventStartDate.getTime() && dateTime <= eventEndDate.getTime()
       })
 
       days.push({
